@@ -23,7 +23,7 @@ db.exec(`
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('Visiteur', 'Gestionnaire', 'Technicien', 'Pasteur'))
+    role TEXT NOT NULL CHECK(role IN ('Visiteur', 'Administrateur', 'Technicien', 'Pasteur'))
   );
 
   CREATE TABLE IF NOT EXISTS meditations (
@@ -71,6 +71,15 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (programme_id) REFERENCES programmes(id)
   );
+
+  CREATE TABLE IF NOT EXISTS role_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    requested_role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'En attente',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
 `);
 
 // Seed initial accounts if not exists
@@ -88,7 +97,7 @@ const seedAccount = (name: string, email: string, password: string, role: string
 };
 
 seedAccount("Admin Technicien", "tech@rehoboth.cd", "admin123", "Technicien");
-seedAccount("Gestionnaire Finance", "finance@rehoboth.cd", "manager123", "Gestionnaire");
+seedAccount("Administrateur Finance", "finance@rehoboth.cd", "manager123", "Administrateur");
 seedAccount("Pasteur Principal", "pasteur@rehoboth.cd", "pasteur123", "Pasteur");
 
 async function startServer() {
@@ -109,7 +118,7 @@ async function startServer() {
   };
 
   const isManagerOrTech = (req: any, res: any, next: any) => {
-    if (req.user.role !== "Gestionnaire" && req.user.role !== "Technicien") {
+    if (req.user.role !== "Administrateur" && req.user.role !== "Technicien") {
       return res.status(403).json({ error: "Accès refusé" });
     }
     next();
@@ -199,7 +208,7 @@ async function startServer() {
 
   // US01: Record Finances
   app.post("/api/finances", authenticate, (req: any, res) => {
-    if (req.user.role !== "Gestionnaire" && req.user.role !== "Technicien") {
+    if (req.user.role !== "Administrateur" && req.user.role !== "Technicien") {
       return res.status(403).json({ error: "Accès refusé" });
     }
 
@@ -412,6 +421,172 @@ async function startServer() {
     try {
       db.prepare("DELETE FROM meditations WHERE id = ?").run(id);
       res.json({ message: "Méditation supprimée" });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur" });
+    }
+  });
+
+  // US: User Profile Management
+  app.put("/api/user/profile", authenticate, (req: any, res) => {
+    const { name, email } = req.body;
+    if (!name || !email) {
+      return res.status(400).json({ error: "Le nom et l'email sont obligatoires" });
+    }
+
+    try {
+      db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(name, email, req.user.id);
+      res.json({ message: "Profil mis à jour avec succès" });
+    } catch (err: any) {
+      if (err.message.includes("UNIQUE constraint failed")) {
+        return res.status(400).json({ error: "Cet email est déjà utilisé" });
+      }
+      res.status(500).json({ error: "Erreur lors de la mise à jour du profil" });
+    }
+  });
+
+  app.put("/api/user/password", authenticate, (req: any, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Tous les champs sont obligatoires" });
+    }
+
+    try {
+      const user: any = db.prepare("SELECT password FROM users WHERE id = ?").get(req.user.id);
+      if (!bcrypt.compareSync(currentPassword, user.password)) {
+        return res.status(401).json({ error: "Mot de passe actuel incorrect" });
+      }
+
+      const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
+      db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashedNewPassword, req.user.id);
+      res.json({ message: "Mot de passe modifié avec succès" });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur lors du changement de mot de passe" });
+    }
+  });
+
+  app.post("/api/user/role-request", authenticate, (req: any, res) => {
+    const { requestedRole } = req.body;
+    const validRoles = ['Visiteur', 'Administrateur', 'Technicien', 'Pasteur'];
+    
+    if (!validRoles.includes(requestedRole)) {
+      return res.status(400).json({ error: "Rôle invalide" });
+    }
+
+    // If changing to Visiteur, do it immediately (no approval needed per common logic, 
+    // though the prompt says "not towards Visiteur" needs approval)
+    if (requestedRole === 'Visiteur') {
+      try {
+        db.prepare("UPDATE users SET role = ? WHERE id = ?").run(requestedRole, req.user.id);
+        return res.json({ message: "Rôle mis à jour en Visiteur", immediate: true });
+      } catch (err) {
+        return res.status(500).json({ error: "Erreur lors de la mise à jour" });
+      }
+    }
+
+    try {
+      // Check if there's already a pending request
+      const existing = db.prepare("SELECT * FROM role_requests WHERE user_id = ? AND status = 'En attente'").get(req.user.id);
+      if (existing) {
+        return res.status(400).json({ error: "Vous avez déjà une demande en attente" });
+      }
+
+      db.prepare("INSERT INTO role_requests (user_id, requested_role) VALUES (?, ?)").run(req.user.id, requestedRole);
+      res.json({ message: "Demande de changement de rôle envoyée au Pasteur pour approbation" });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur lors de l'envoi de la demande" });
+    }
+  });
+
+  app.get("/api/admin/role-requests", authenticate, isPasteur, (req, res) => {
+    try {
+      const requests = db.prepare(`
+        SELECT rr.*, u.name, u.email, u.role as current_role 
+        FROM role_requests rr 
+        JOIN users u ON rr.user_id = u.id 
+        WHERE rr.status = 'En attente'
+        ORDER BY rr.created_at DESC
+      `).all();
+      res.json(requests);
+    } catch (err) {
+      res.status(500).json({ error: "Erreur lors de la récupération des demandes" });
+    }
+  });
+
+  app.post("/api/admin/role-requests/:id/approve", authenticate, isPasteur, (req, res) => {
+    const { id } = req.params;
+    try {
+      const request: any = db.prepare("SELECT * FROM role_requests WHERE id = ?").get(id);
+      if (!request) return res.status(404).json({ error: "Demande non trouvée" });
+
+      db.transaction(() => {
+        db.prepare("UPDATE users SET role = ? WHERE id = ?").run(request.requested_role, request.user_id);
+        db.prepare("UPDATE role_requests SET status = 'Approuvé' WHERE id = ?").run(id);
+      })();
+
+      res.json({ message: "Demande approuvée avec succès" });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur lors de l'approbation" });
+    }
+  });
+
+  app.post("/api/admin/role-requests/:id/reject", authenticate, isPasteur, (req, res) => {
+    const { id } = req.params;
+    try {
+      db.prepare("UPDATE role_requests SET status = 'Refusé' WHERE id = ?").run(id);
+      res.json({ message: "Demande refusée" });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur lors du refus" });
+    }
+  });
+
+  app.get("/api/admin/users", authenticate, isPasteur, (req, res) => {
+    try {
+      const users = db.prepare("SELECT id, name, email, role FROM users").all();
+      res.json(users);
+    } catch (err) {
+      res.status(500).json({ error: "Erreur" });
+    }
+  });
+
+  app.post("/api/admin/users", authenticate, isPasteur, (req, res) => {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ error: "Tous les champs sont obligatoires" });
+    }
+
+    if (role === 'Administrateur' || role === 'Technicien') {
+      const count: any = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = ?").get(role);
+      if (count.count >= 1) {
+        return res.status(400).json({ error: `Il ne peut y avoir qu'un seul ${role.toLowerCase()} dans le système.` });
+      }
+    }
+
+    try {
+      const hashedPassword = bcrypt.hashSync(password, 10);
+      db.prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)").run(name, email, hashedPassword, role);
+      res.json({ message: "Utilisateur créé avec succès" });
+    } catch (err: any) {
+      if (err.message.includes("UNIQUE constraint failed")) {
+        return res.status(400).json({ error: "Cet email est déjà utilisé" });
+      }
+      res.status(500).json({ error: "Erreur lors de la création" });
+    }
+  });
+
+  app.put("/api/admin/users/:id/role", authenticate, isPasteur, (req, res) => {
+    const { id } = req.params;
+    const { role } = req.body;
+    
+    if (role === 'Administrateur' || role === 'Technicien') {
+      const count: any = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = ? AND id != ?").get(role, id);
+      if (count.count >= 1) {
+        return res.status(400).json({ error: `Il ne peut y avoir qu'un seul ${role.toLowerCase()} dans le système.` });
+      }
+    }
+
+    try {
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
+      res.json({ message: "Rôle mis à jour" });
     } catch (err) {
       res.status(500).json({ error: "Erreur" });
     }

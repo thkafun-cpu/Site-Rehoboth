@@ -20,13 +20,15 @@ import {
   Trash2,
   Search,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Lock,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 
 // --- Types ---
-type Role = 'Visiteur' | 'Gestionnaire' | 'Technicien' | 'Pasteur';
+type Role = 'Visiteur' | 'Administrateur' | 'Technicien' | 'Pasteur';
 
 interface User {
   id: number;
@@ -195,6 +197,7 @@ const Navbar = ({ user, onLogout, currentView }: { user: User | null; onLogout: 
     { name: 'Cultes', href: '#programmes', view: 'programmes' },
     { name: 'Méditations', href: '#meditations', view: 'meditations' },
     { name: 'Contact', href: '#contact', view: 'home' },
+    { name: 'Profil', href: '#profile', protected: true, view: 'profile' },
     { name: 'Administration', href: '#admin', protected: true, view: 'admin' },
   ];
 
@@ -1276,13 +1279,282 @@ const LoginForm = ({ onLogin }: { onLogin: (data: any) => void }) => {
   );
 };
 
+const UserProfile = ({ user, token, onUpdateUser }: { user: User; token: string; onUpdateUser: (user: User) => void }) => {
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [requestedRole, setRequestedRole] = useState<Role>(user.role);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name, email })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(data.message);
+        onUpdateUser({ ...user, name, email });
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Erreur lors de la mise à jour');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError('Les nouveaux mots de passe ne correspondent pas');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/user/password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(data.message);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Erreur lors du changement de mot de passe');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRoleRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (requestedRole === user.role) return;
+    
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/user/role-request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ requestedRole })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(data.message);
+        if (data.immediate) {
+          onUpdateUser({ ...user, role: requestedRole });
+        }
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Erreur lors de la demande de changement de rôle');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-12">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100"
+      >
+        <div className="bg-church-blue p-8 text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-church-gold rounded-full flex items-center justify-center text-church-blue text-2xl font-bold">
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">{user.name}</h2>
+              <p className="text-church-gold text-sm font-medium uppercase tracking-wider">{user.role}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-8">
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2">
+              <AlertTriangle size={18} /> {error}
+            </div>
+          )}
+          {success && (
+            <div className="mb-6 p-4 bg-green-50 text-green-600 rounded-xl text-sm font-medium flex items-center gap-2">
+              <CheckCircle2 size={18} /> {success}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+            {/* Personal Info */}
+            <section>
+              <h3 className="text-lg font-bold text-church-blue mb-6 flex items-center gap-2">
+                <UserIcon size={20} className="text-church-gold" /> Informations Personnelles
+              </h3>
+              <form onSubmit={handleUpdateProfile} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Nom Complet</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-church-blue text-white py-3 rounded-xl font-bold hover:bg-opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Mise à jour...' : 'Enregistrer les modifications'}
+                </button>
+              </form>
+            </section>
+
+            {/* Role Change Request - Only for Technicien as requested */}
+            {user.role === 'Technicien' && (
+              <section>
+                <h3 className="text-lg font-bold text-church-blue mb-6 flex items-center gap-2">
+                  <Settings size={20} className="text-church-gold" /> Changement de Rôle
+                </h3>
+                <form onSubmit={handleRoleRequest} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Nouveau Rôle Souhaité</label>
+                    <select
+                      value={requestedRole}
+                      onChange={(e) => setRequestedRole(e.target.value as Role)}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    >
+                      <option value="Visiteur">Visiteur (Immédiat)</option>
+                      <option value="Administrateur">Administrateur (Approbation requise)</option>
+                      <option value="Technicien">Technicien</option>
+                      <option value="Pasteur">Pasteur (Approbation requise)</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || requestedRole === user.role}
+                    className="w-full bg-white border-2 border-church-blue text-church-blue py-3 rounded-xl font-bold hover:bg-church-blue hover:text-white transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Envoi...' : 'Demander le changement'}
+                  </button>
+                  <p className="text-[10px] text-gray-400 italic">
+                    Note: Tout changement vers un rôle autre que 'Visiteur' doit être approuvé par le Pasteur.
+                  </p>
+                </form>
+              </section>
+            )}
+
+            {/* Change Password */}
+            <section>
+              <h3 className="text-lg font-bold text-church-blue mb-6 flex items-center gap-2">
+                <Lock size={20} className="text-church-gold" /> Sécurité du Compte
+              </h3>
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Mot de passe actuel</label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Nouveau mot de passe</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Confirmer le nouveau mot de passe</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-church-gold text-church-blue py-3 rounded-xl font-bold hover:bg-opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Mise à jour...' : 'Changer le mot de passe'}
+                </button>
+              </form>
+            </section>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
-  const [activeTab, setActiveTab] = useState<'finances' | 'history' | 'settings' | 'meditations' | 'search'>('finances');
+  const [activeTab, setActiveTab] = useState<'finances' | 'history' | 'settings' | 'meditations' | 'search' | 'roles'>('finances');
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [meditations, setMeditations] = useState<Meditation[]>([]);
+  const [roleRequests, setRoleRequests] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // User Creation State
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<Role>('Administrateur');
+  const [userActionMessage, setUserActionMessage] = useState('');
   
   // Finance Form State
   const [type, setType] = useState('Dîme');
@@ -1294,6 +1566,10 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
   const [filterType, setFilterType] = useState('Tous');
   const [filterStatus, setFilterStatus] = useState('Tous');
   const [filterDate, setFilterDate] = useState('');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const fetchFinances = async () => {
     try {
@@ -1327,6 +1603,121 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
     }
   };
 
+  const fetchRoleRequests = async () => {
+    if (user.role !== 'Pasteur') return;
+    try {
+      const res = await fetch('/api/admin/role-requests', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setRoleRequests(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchAllUsers = async () => {
+    if (user.role !== 'Pasteur') return;
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setAllUsers(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleApproveRole = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/role-requests/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchRoleRequests();
+        fetchAllUsers();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRejectRole = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/role-requests/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchRoleRequests();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateUserRole = async (userId: number, newRole: Role) => {
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ role: newRole })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchAllUsers();
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setUserActionMessage('');
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: newUserName,
+          email: newUserEmail,
+          password: newUserPassword,
+          role: newUserRole
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUserActionMessage('Succès : Utilisateur créé');
+        fetchAllUsers();
+        setTimeout(() => {
+          setIsUserModalOpen(false);
+          setNewUserName('');
+          setNewUserEmail('');
+          setNewUserPassword('');
+          setUserActionMessage('');
+        }, 1500);
+      } else {
+        setUserActionMessage(`Erreur : ${data.error}`);
+      }
+    } catch (err) {
+      setUserActionMessage('Erreur serveur');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredEntries = entries.filter(entry => {
     const matchesType = filterType === 'Tous' || entry.type === filterType;
     const matchesStatus = filterStatus === 'Tous' || entry.status === filterStatus;
@@ -1334,10 +1725,25 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
     return matchesType && matchesStatus && matchesDate;
   });
 
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredEntries.length / itemsPerPage);
+  const paginatedEntries = filteredEntries.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  useEffect(() => {
+    setCurrentPage(1); // Reset to first page when filters change
+  }, [filterType, filterStatus, filterDate]);
+
   useEffect(() => {
     fetchFinances();
     fetchProgrammes();
     fetchMeditations();
+    if (user.role === 'Pasteur') {
+      fetchRoleRequests();
+      fetchAllUsers();
+    }
   }, []);
 
   const searchResults = {
@@ -1459,6 +1865,17 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
               <BookOpen size={20} /> Méditations
             </button>
           )}
+          {user.role === 'Pasteur' && (
+            <button 
+              onClick={() => setActiveTab('roles')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium",
+                activeTab === 'roles' ? "bg-church-blue text-white" : "hover:bg-gray-100 text-gray-600"
+              )}
+            >
+              <Users size={20} /> Rôles
+            </button>
+          )}
           <button 
             onClick={() => setActiveTab('settings')}
             className={cn(
@@ -1487,7 +1904,223 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
         {/* Main Content */}
         <main className="flex-1">
           <AnimatePresence mode="wait">
-            {activeTab === 'finances' ? (
+            {activeTab === 'roles' ? (
+              <motion.div
+                key="roles"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-8"
+              >
+                {/* Role Requests */}
+                <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="flex items-center gap-3 mb-6">
+                    <AlertTriangle className="text-church-gold" size={24} />
+                    <h2 className="text-xl font-bold text-church-blue">Demandes de changement de rôle</h2>
+                  </div>
+                  
+                  {roleRequests.length === 0 ? (
+                    <p className="text-gray-400 text-sm text-center py-8 italic">Aucune demande en attente.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-gray-50 text-[10px] uppercase font-bold text-gray-400">
+                          <tr>
+                            <th className="px-4 py-2">Utilisateur</th>
+                            <th className="px-4 py-2">Rôle Actuel</th>
+                            <th className="px-4 py-2">Rôle Demandé</th>
+                            <th className="px-4 py-2">Date</th>
+                            <th className="px-4 py-2">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-sm divide-y divide-gray-50">
+                          {roleRequests.map(req => (
+                            <tr key={req.id}>
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-church-blue">{req.user_name}</div>
+                                <div className="text-xs text-gray-400">{req.user_email}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-bold uppercase">
+                                  {req.current_role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="px-2 py-0.5 bg-church-gold/20 text-church-gold rounded text-[10px] font-bold uppercase">
+                                  {req.requested_role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-gray-400">{formatDate(req.created_at)}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex gap-2">
+                                  <button 
+                                    onClick={() => handleApproveRole(req.id)}
+                                    className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                    title="Approuver"
+                                  >
+                                    <CheckCircle2 size={18} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleRejectRole(req.id)}
+                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Refuser"
+                                  >
+                                    <X size={18} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+
+                {/* All Users */}
+                <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div className="flex items-center gap-3">
+                      <Users className="text-church-gold" size={24} />
+                      <h2 className="text-xl font-bold text-church-blue">Gestion du Personnel (Admin/Tech)</h2>
+                    </div>
+                    <button 
+                      onClick={() => setIsUserModalOpen(true)}
+                      className="flex items-center gap-2 bg-church-blue text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-opacity-90 transition-all"
+                    >
+                      <PlusCircle size={18} /> Créer un utilisateur
+                    </button>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50 text-[10px] uppercase font-bold text-gray-400">
+                        <tr>
+                          <th className="px-4 py-2">Utilisateur</th>
+                          <th className="px-4 py-2">Rôle Actuel</th>
+                          <th className="px-4 py-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-sm divide-y divide-gray-50">
+                        {allUsers.filter(u => u.role === 'Administrateur' || u.role === 'Technicien' || u.role === 'Pasteur').map(u => (
+                          <tr key={u.id}>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-church-blue">{u.name}</div>
+                              <div className="text-xs text-gray-400">{u.email}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                u.role === 'Pasteur' ? "bg-church-blue text-white" : "bg-gray-100 text-gray-600"
+                              )}>
+                                {u.role}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {u.role !== 'Pasteur' ? (
+                                <button 
+                                  onClick={() => handleUpdateUserRole(u.id, 'Visiteur')}
+                                  className="text-[10px] text-red-500 font-bold hover:underline flex items-center gap-1"
+                                >
+                                  <X size={12} /> Réinitialiser
+                                </button>
+                              ) : (
+                                <span className="text-xs text-gray-400 italic">Rôle protégé</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <Modal 
+                  isOpen={isUserModalOpen} 
+                  onClose={() => {
+                    setIsUserModalOpen(false);
+                    setUserActionMessage('');
+                  }} 
+                  title="Créer un nouvel utilisateur"
+                >
+                  <form onSubmit={handleCreateUser} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Nom Complet</label>
+                      <input
+                        type="text"
+                        required
+                        value={newUserName}
+                        onChange={(e) => setNewUserName(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                        placeholder="Ex: Jean Dupont"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Email</label>
+                      <input
+                        type="email"
+                        required
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                        placeholder="email@rehoboth.cd"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Mot de passe</label>
+                      <input
+                        type="password"
+                        required
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">Rôle</label>
+                      <select
+                        value={newUserRole}
+                        onChange={(e) => setNewUserRole(e.target.value as Role)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-church-blue transition-all"
+                      >
+                        <option value="Administrateur">Administrateur (Max 1)</option>
+                        <option value="Technicien">Technicien (Max 1)</option>
+                      </select>
+                    </div>
+
+                    {userActionMessage && (
+                      <p className={cn(
+                        "text-sm font-medium p-3 rounded-lg text-center",
+                        userActionMessage.includes('Succès') ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+                      )}>
+                        {userActionMessage}
+                      </p>
+                    )}
+
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserModalOpen(false);
+                          setUserActionMessage('');
+                        }}
+                        className="flex-1 px-4 py-4 rounded-xl font-bold border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="flex-[2] bg-church-blue text-white py-4 rounded-xl font-bold hover:bg-opacity-90 transition-all disabled:opacity-50"
+                      >
+                        {loading ? 'Création...' : 'Créer l\'utilisateur'}
+                      </button>
+                    </div>
+                  </form>
+                </Modal>
+              </motion.div>
+            ) : activeTab === 'finances' ? (
               <motion.div
                 key="finances"
                 initial={{ opacity: 0, x: 20 }}
@@ -1500,68 +2133,74 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
                   <h2 className="text-2xl font-bold text-church-blue">Enregistrer une entrée</h2>
                 </div>
 
-                <form onSubmit={handleRecordFinance} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Type d'entrée</label>
-                      <select 
-                        value={type}
-                        onChange={(e) => setType(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-church-blue outline-none"
-                      >
-                        <option>Dîme</option>
-                        <option>Offrandes normales</option>
-                        <option>Dons</option>
-                        <option>Offrandes spéciales</option>
-                        <option>Offrandes Ecodim</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Montant</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          required
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
+                {user.role !== 'Pasteur' ? (
+                  <form onSubmit={handleRecordFinance} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Type d'entrée</label>
+                        <select 
+                          value={type}
+                          onChange={(e) => setType(e.target.value)}
                           className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-church-blue outline-none"
-                          placeholder="0.00"
-                        />
-                        <div className="absolute right-2 top-2 bottom-2 flex gap-1">
-                          <button 
-                            type="button"
-                            onClick={() => setCurrency('CDF')}
-                            className={cn("px-3 rounded-lg text-xs font-bold transition-all", currency === 'CDF' ? "bg-church-blue text-white" : "bg-gray-100 text-gray-500")}
-                          >
-                            CDF
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setCurrency('USD')}
-                            className={cn("px-3 rounded-lg text-xs font-bold transition-all", currency === 'USD' ? "bg-church-blue text-white" : "bg-gray-100 text-gray-500")}
-                          >
-                            USD
-                          </button>
+                        >
+                          <option>Dîme</option>
+                          <option>Offrandes normales</option>
+                          <option>Dons</option>
+                          <option>Offrandes spéciales</option>
+                          <option>Offrandes Ecodim</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Montant</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            required
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-church-blue outline-none"
+                            placeholder="0.00"
+                          />
+                          <div className="absolute right-2 top-2 bottom-2 flex gap-1">
+                            <button 
+                              type="button"
+                              onClick={() => setCurrency('CDF')}
+                              className={cn("px-3 rounded-lg text-xs font-bold transition-all", currency === 'CDF' ? "bg-church-blue text-white" : "bg-gray-100 text-gray-500")}
+                            >
+                              CDF
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => setCurrency('USD')}
+                              className={cn("px-3 rounded-lg text-xs font-bold transition-all", currency === 'USD' ? "bg-church-blue text-white" : "bg-gray-100 text-gray-500")}
+                            >
+                              USD
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex flex-col justify-end">
-                    {message && (
-                      <p className={cn("text-sm font-medium mb-4 p-3 rounded-lg text-center", message.includes('Succès') ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600")}>
-                        {message}
-                      </p>
-                    )}
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full bg-church-blue text-white py-4 rounded-xl font-bold hover:bg-opacity-90 transition-all flex items-center justify-center gap-2"
-                    >
-                      {loading ? 'Traitement...' : <><PlusCircle size={20} /> Valider l'entrée</>}
-                    </button>
+                    <div className="flex flex-col justify-end">
+                      {message && (
+                        <p className={cn("text-sm font-medium mb-4 p-3 rounded-lg text-center", message.includes('Succès') ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600")}>
+                          {message}
+                        </p>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-church-blue text-white py-4 rounded-xl font-bold hover:bg-opacity-90 transition-all flex items-center justify-center gap-2"
+                      >
+                        {loading ? 'Traitement...' : <><PlusCircle size={20} /> Valider l'entrée</>}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    <p className="text-gray-500 italic">Le Pasteur peut consulter les finances mais l'enregistrement est réservé aux Administrateurs et Techniciens.</p>
                   </div>
-                </form>
+                )}
 
                 <div className="mt-12">
                   <h3 className="text-lg font-bold text-church-blue mb-4">Dernières transactions</h3>
@@ -1786,7 +2425,7 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredEntries.map((entry) => (
+                      {paginatedEntries.map((entry) => (
                         <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
                           <td className="py-4 px-2">
                             <p className="font-bold text-church-blue text-sm">{entry.type}</p>
@@ -1814,6 +2453,42 @@ const AdminDashboard = ({ user, token }: { user: User; token: string }) => {
                       ))}
                     </tbody>
                   </table>
+                  
+                  {filteredEntries.length > 0 && (
+                    <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-50">
+                      <p className="text-xs text-gray-400">
+                        Affichage de <span className="font-bold text-church-blue">{(currentPage - 1) * itemsPerPage + 1}</span> à <span className="font-bold text-church-blue">{Math.min(currentPage * itemsPerPage, filteredEntries.length)}</span> sur <span className="font-bold text-church-blue">{filteredEntries.length}</span> transactions
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={currentPage === 1}
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold hover:bg-gray-50 disabled:opacity-30 transition-all"
+                        >
+                          Précédent
+                        </button>
+                        {[...Array(totalPages)].map((_, i) => (
+                          <button
+                            key={i + 1}
+                            onClick={() => setCurrentPage(i + 1)}
+                            className={cn(
+                              "w-8 h-8 rounded-lg text-xs font-bold transition-all",
+                              currentPage === i + 1 ? "bg-church-blue text-white shadow-md" : "border border-gray-100 text-gray-400 hover:bg-gray-50"
+                            )}
+                          >
+                            {i + 1}
+                          </button>
+                        )).slice(Math.max(0, currentPage - 3), Math.min(totalPages, currentPage + 2))}
+                        <button
+                          disabled={currentPage === totalPages}
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold hover:bg-gray-50 disabled:opacity-30 transition-all"
+                        >
+                          Suivant
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   
                   {filteredEntries.length === 0 && (
                     <div className="text-center py-12">
@@ -1870,6 +2545,76 @@ const Home = () => {
         </div>
       </section>
 
+      {/* Scrolling Info Marquee */}
+      <div className="bg-church-gold/10 border-y border-church-gold/20 py-3 marquee-container">
+        <div className="animate-marquee inline-block">
+          <span className="text-church-blue font-bold text-sm mx-8">
+            <span className="text-church-gold uppercase tracking-widest mr-2">Thème de l'année :</span> 
+            La Gloire de la Restauration
+          </span>
+          <span className="text-church-blue font-bold text-sm mx-8">
+            <span className="text-church-gold uppercase tracking-widest mr-2">Pensée du mois :</span> 
+            La Fidélité de Dieu
+          </span>
+          {/* Duplicate for seamless loop if needed, but simple marquee is fine for now */}
+          <span className="text-church-blue font-bold text-sm mx-8">
+            <span className="text-church-gold uppercase tracking-widest mr-2">Thème de l'année :</span> 
+            La Gloire de la Restauration
+          </span>
+          <span className="text-church-blue font-bold text-sm mx-8">
+            <span className="text-church-gold uppercase tracking-widest mr-2">Pensée du mois :</span> 
+            La Fidélité de Dieu
+          </span>
+        </div>
+      </div>
+
+      {/* Special Program Section */}
+      <section className="py-16 px-4 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-church-blue rounded-[2rem] overflow-hidden shadow-2xl flex flex-col md:flex-row items-stretch">
+            <div className="md:w-1/2 relative min-h-[300px]">
+              <img 
+                src="https://images.unsplash.com/photo-1490730141103-6cac27aaab94?auto=format&fit=crop&q=80&w=1000" 
+                alt="Mains levées en prière" 
+                className="absolute inset-0 w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-church-blue/60 to-transparent md:bg-gradient-to-l" />
+            </div>
+            <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-center text-white">
+              <div className="inline-block px-4 py-1 bg-church-gold text-church-blue text-xs font-black uppercase tracking-widest rounded-full mb-6">
+                Événement Spécial
+              </div>
+              <h3 className="text-3xl md:text-4xl font-black mb-4">Prière des Familles</h3>
+              <p className="text-white/70 mb-8 leading-relaxed">
+                Rejoignez-nous pour un moment exceptionnel d'intercession et de bénédiction pour tous les foyers. Un temps de restauration et de grâce divine pour votre famille.
+              </p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                    <Calendar className="text-church-gold" size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-church-gold font-bold mb-1">Période</p>
+                    <p className="text-sm font-bold">15 Mai - 17 Juin 2026</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                    <Clock className="text-church-gold" size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-church-gold font-bold mb-1">Horaire</p>
+                    <p className="text-sm font-bold">Mer. & Ven. | 17h - 19h</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Info Sections */}
       <section id="info" className="py-16 px-4 max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="bg-gray-50 p-8 rounded-3xl border border-gray-100">
@@ -1904,10 +2649,6 @@ const Home = () => {
           <p className="text-gray-600 text-sm mb-4">
             Avenue du fleuve n°2, Kinsuka Pêcheur, Commune Ngaliema, Kinshasa/RDC
           </p>
-          <div className="space-y-2">
-            <p className="text-xs font-bold text-church-blue">Thème de l'année : <span className="text-church-gold">La Gloire de la Restauration</span></p>
-            <p className="text-xs font-bold text-church-blue">Pensée du mois : <span className="text-church-gold">La Fidélité de Dieu</span></p>
-          </div>
         </div>
       </section>
     </div>
@@ -1917,7 +2658,7 @@ const Home = () => {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [view, setView] = useState<'home' | 'auth-choice' | 'login' | 'register' | 'admin' | 'programmes' | 'meditations'>('home');
+  const [view, setView] = useState<'home' | 'auth-choice' | 'login' | 'register' | 'admin' | 'programmes' | 'meditations' | 'profile'>('home');
 
   useEffect(() => {
     // Scroll to hash element if it exists
@@ -1954,6 +2695,7 @@ export default function App() {
       else if (hash === '#admin') setView('admin');
       else if (hash === '#programmes') setView('programmes');
       else if (hash === '#meditations') setView('meditations');
+      else if (hash === '#profile') setView('profile');
       else if (hash === '#admin-settings') {
         if (savedToken) setView('admin'); // Will default to admin view, user can switch to settings
         else setView('login');
@@ -1972,7 +2714,7 @@ export default function App() {
     localStorage.setItem('rehoboth_user', JSON.stringify(data.user));
     
     // Redirect based on role
-    if (data.user.role === 'Gestionnaire' || data.user.role === 'Technicien') {
+    if (data.user.role === 'Administrateur' || data.user.role === 'Technicien') {
       setView('admin');
       window.location.hash = '#admin';
     } else {
@@ -1998,6 +2740,10 @@ export default function App() {
         {view === 'home' && <Home />}
         {view === 'programmes' && <ProgrammesView token={token} />}
         {view === 'meditations' && <MeditationsView />}
+        {view === 'profile' && user && token && <UserProfile user={user} token={token} onUpdateUser={(updatedUser) => {
+          setUser(updatedUser);
+          localStorage.setItem('rehoboth_user', JSON.stringify(updatedUser));
+        }} />}
         {view === 'auth-choice' && !user && <AuthChoice />}
         {view === 'login' && !user && <LoginForm onLogin={handleAuthSuccess} />}
         {view === 'register' && !user && <RegisterForm onRegister={handleAuthSuccess} />}
